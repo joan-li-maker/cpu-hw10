@@ -1,0 +1,142 @@
+MODULE DataAccess
+DataAccess INTERFACE  (Accum7..Accum0, Offset7..Offset0,
+                       Inc, Dec, XLatchEn, SLatchEn, Pre, 
+                       OffsetEn, Sel1..Sel0, Reset, Clock
+                       -> DataAddr7..DataAddr0, XReg7..XReg0, SReg7..SReg0);
+
+" TITLE 'Data Memory Access Unit'
+" Description: This is the file for HW #8. It implements the Data Memory 
+"              Access Unit. This module is the bottom-level for the unit demos 
+"              using the Unit Demo Board.
+"
+" Inputs:   Accum[7..0]    - 8 bit of address or data
+"           Offset[7..0]   - 8 bit of data or offset
+"           Inc            - 1 bit control for Inc
+"           Dec            - 1 bit control for Dec
+"           XLatchEn       - 1 bit control for latching XReg
+"           SLatchEn       - 1 bit control for latching SReg
+"           Pre            - 1 bit control for Pre/!Post
+"           OffsetEn       - 1 bit control for enabling Offset
+"           Sel1..Sel0     - 2 bit mux select for address source
+"           Reset          - system reset
+"           Clock          - system clock 
+"
+" Outputs:  DataAddr[7..0] - 8 bit accumulator address output
+"           XReg[7..0]     - 8 bit XReg 
+"           SReg[7..0]     - 8 bit SReg 
+"
+" Revision History:
+" 03/08/26      Joan Li     Initial Revision
+" 03/08/26      Joan Li     Updated Comments
+"
+
+"Source Selects===============================================================
+" Source Selects for Addend
+"       Inc     Dec
+" HOLD   0       0
+" INC    1       0
+" DEC    0       1
+
+" Source Selects for AddrSource
+"           Sel1    Sel0
+" MemAddr    0       0
+" XReg       1       0
+" SReg       0       1
+" Accum      1       1
+
+
+"Pin/Signal Declarations======================================================
+
+"Inputs-----------------------------------------------------------------------
+Accum7..Accum0	    pin;  "8 bit of address or data
+Offset7..Offset0    pin;  "8 bit of data or offset
+
+
+Inc                 pin;  "1 bit control for Inc
+Dec                 pin;  "1 bit control for Dec
+XLatchEn            pin;  "1 bit control for latching XReg
+SLatchEn            pin;  "1 bit control for latching SReg
+Pre                 pin;  "1 bit control for Pre/!Post
+OffsetEn            pin;  "1 bit control for enabling Offset
+Sel1..Sel0          pin;  "2 bit mux select for address source
+Reset	            pin;  "system reset
+Clock	            pin;  "system clock 
+
+"Outputs----------------------------------------------------------------------
+DataAddr7..DataAddr0	               pin;  "8 bit accumulator address output
+XReg7..XReg0		  pin ISTYPE 'REG';  "8 bit XReg
+SReg7..SReg0		  pin ISTYPE 'REG';  "8 bit SReg
+
+"Intermediate Terms-----------------------------------------------------------
+AddrSource7..AddrSource0	        node;  "8 bit for AddrSource
+DataMemAddr7..DataMemAddr0	        node;  "8 bit for DataMemAddr
+OffsetLoad7..OffsetLoad0	        node;  "8 bit for MemAddr and Offset
+Addend7..Addend0	                node;  "8 bit for Addend
+Carry7..Carry0 		                node;  "8 bit carry for first adder
+CarryTwo7..CarryTwo0 	                node;  "8 bit carry for second adder
+PreDataMemAddr7..PreDataMemAddr0    	node;  "8 bit for pre/post mux output 
+
+"Busses/Vectors---------------------------------------------------------------
+Offset = [Offset7..Offset0];                 "mux source for AddrSource & input
+				  	     "in second adder
+XReg = [XReg7..XReg0];                       "mux source for AddrSource
+SReg = [SReg7..SReg0];                       "mux source for AddrSource
+Accum = [Accum7..Accum0];                    "mux source for AddrSource
+DataAddr = [DataAddr7..DataAddr0];           "result after second adder
+AddrSource = [AddrSource7..AddrSource0];     "input in first adder
+DataMemAddr = [DataMemAddr7..DataMemAddr0];  "input in second adder
+Addend = [Addend7..Addend0];                 "input in first adder
+OffsetLoad = [OffsetLoad7..OffsetLoad0];     "mux output for offset
+PreDataMemAddr = [PreDataMemAddr7..PreDataMemAddr0];
+					     "mux output for pre or post
+
+Carry = [Carry7..Carry0];                    "first set of carry flags
+CarryTwo = [CarryTwo7..CarryTwo0];           "second set of carry flags
+
+Zero = [0, 0, 0, 0, 0, 0, 0, 0];             "constant 0 value 
+IncOne = [0, 0, 0, 0, 0, 0, 0, 1];           "unsigned value of 1
+DecOne = [1, 1, 1, 1, 1, 1, 1, 1];           "signed value of -1
+
+
+EQUATIONS"=====================================================================
+XReg.CLR = Reset; "clears XReg when reset is active low 
+XReg.CLK = Clock;  "XReg updates on clock edge
+SReg.CLR = Reset; "clears SReg when reset is active low 
+SReg.CLK = Clock;  "SReg updates on clock edge
+
+" 8x 3:1 mux for Addend-------------------------------------------------------
+Addend = (!Inc & !Dec & Zero)   # 
+         ( Inc & !Dec & IncOne) #
+         (!Inc &  Dec & DecOne);
+
+" 8x 4:1 mux for AddrSource---------------------------------------------------
+AddrSource = (!Sel1 & !Sel0 & Offset) #
+             ( Sel1 & !Sel0 & XReg) #
+             (!Sel1 &  Sel0 & SReg) #
+             ( Sel1 &  Sel0 & Accum);
+
+" Addition of Addend and AddrSource-------------------------------------------
+Carry0 = 0;
+Carry[7..1] = (Addend[6..0] & AddrSource[6..0]) #
+	      (Carry[6..0] & (Addend[6..0] $ AddrSource[6..0]));
+
+DataMemAddr = Carry $ AddrSource $ Addend;
+
+" 8x 2:1 mux for latching X and S Reg-----------------------------------------
+XReg := (XLatchEn & DataMemAddr) # (!XLatchEn & XReg);
+SReg := (SLatchEn & DataMemAddr) # (!SLatchEn & SReg);
+
+" 8x 2:1 mux for Pre or Post Inc or Dec---------------------------------------
+PreDataMemAddr = (!Pre & AddrSource) #
+                 (Pre & DataMemAddr);
+
+" 8x 2:1 mux for Offset-------------------------------------------------------
+OffsetLoad = (OffsetEn & Offset);
+
+" Addition of Offset and DataMemAddr------------------------------------------
+CarryTwo0 = 0;
+CarryTwo[7..1] = (OffsetLoad[6..0] & PreDataMemAddr[6..0]) # 
+                 (CarryTwo[6..0] & (OffsetLoad[6..0] $ PreDataMemAddr[6..0]));
+DataAddr = (CarryTwo $ OffsetLoad $ PreDataMemAddr);
+
+END DataAccess

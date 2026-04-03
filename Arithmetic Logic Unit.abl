@@ -1,0 +1,327 @@
+MODULE ALU
+ALU INTERFACE  (Data7..Data0,
+                FlagsInsSel2..FlagsInsSel0,
+                Sel14..Sel0, 
+                Hold, Adder, Sub,    
+                Reset, Clock
+                -> Accum7..Accum0, Flags7..Flags0);
+" TITLE 'Arithmetic Logic Unit'
+" Description:  This is the file for HW #7. It implements the Arithmetic Logic 
+"               Unit. This module is the bottom-level for the unit demos using 
+"               the Unit Demo Board. The ALU is an 8-bit functional block 
+"               responsible for performing all arithmetic, logical, and shift 
+"               operations within the Caltech10 CPU. The 8-bit Accumulator 
+"               (Accum) register serves as one of the operands for all two
+"               operand instructions and the sole operand for unary 
+"               instructions. It consists of the F_Block, 8-Bit Adder,
+"               Shifter/Rotator, and calculates four status flags
+"               Carry (C), Overflow (V), Sign (S), and Zero (Z) based on 
+"               the results of the adder or shifter. The F_Block Performs 16 
+"               bitwise logical operations (e.g., AND, OR, XOR, NOT) using an 
+"               8x4:1 multiplexer controlled by Sel3..Sel0. The 8-Bit Adder 
+"               combines the F_Block output with the Accumulator value. It 
+"               handles initial carry input (CarryIn0) for operations like ADD, 
+"               ADC, SUB, and SBB. The Shifter/Rotator is a multiplexer-based
+"               unit that shifts or rotates the Accumulator contents left or 
+"               right.
+"
+
+" Inputs:   Data[7..0]  - 8 bit external data input
+"           FlagInsSel[2..0] - 3 bit control for ___________
+"           Sel[14..13] - 2 bit control for when status register (flags) are
+"                         updated.
+"           Sel[12]     - 1 bit control for the final 8-bit result to be 
+"                         latched into Accum. When active high selects adder,
+"                         when active low, selects shifter/rotator output.
+"           Sel[11..10] - 2 bit control for CarryIn0 for 8 bit adder
+"           Sel[9..7]   - 3 bit control for high bit of shifter/rotator
+"           Sel[6]      - 1 bit control for middle bits of shifter/rotator
+"           Sel[5..4]   - 2 bit control for low bit of shifter/rotator
+"           Sel[3..0]   - 4 bit contorl for 8x4:1 mux for logical operations
+"                         between Accum and external Data
+"           Hold        - 1 bit control for hold
+"           Adder       - 1 bit control for using adder
+"           Sub         - 1 bit control for subtraction/addition
+"           Reset       - system reset
+"           Clock       - system clock
+"
+" Outputs: Accum[7..0] - 8 bits accumulator output
+"          Flags[7..0] - 8 bits flags (I, 6, U, 4, C, V, S, Z)
+"
+" Revision History:
+" 03/04/26      Joan Li     Initial Revision
+" 03/06/26      Joan Li     Fixed shifter/rotator
+" 03/07/26      Joan Li     Updated Comments
+" 03/08/26      Joan Li     Fixed Flags
+" 03/08/26      Joan Li     Updated Comments
+" 03/18/26      Joan Li     Updated Comments
+"
+
+
+"Pin/Signal Declarations=======================================================
+
+"Inputs
+Data7..Data0        pin; "input 8 bit external data bus
+FlagsInsSel2..FlagsInsSel0          pin;
+Sel14..Sel13         pin; "input 2 bit control for when status register (flags)
+                         "are updated.
+Sel12             pin; "input 1 bit control for the final 8-bit result to be 
+                         "latched into Accum. When active high selects adder,
+                         "when active low, selects shifter/rotator output.
+Sel11..Sel10         pin; "input 2 bit control for CarryIn0 for 8 bit adder
+Sel9..Sel7           pin; "input 3 bit control for high bit of shifter/rotator
+Sel6              pin; "input 1 bit control for middle bits of shifter/
+                         "rotator
+Sel5..Sel4           pin; "input 2 bit control for low bit of shifter/rotator
+Sel3..Sel0           pin; "input 4 bit contorl for 8x4:1 mux for logical 
+                         "operations between Accum and external Data
+Hold                pin; "input 1 bit hold control for accumulator register
+Adder               pin; "input 1 bit adder control for arithmetic vs shifting
+Sub                 pin; "input 1 bit subtaction/addition control
+Reset               pin; "input 1 bit system reset
+Clock               pin; "input 1 bit system clock
+
+"Outputs
+Accum7..Accum0      pin ISTYPE 'REG'; "8 bit accumulator register
+Flags7..Flags0      pin ISTYPE 'REG'; "status flags (I, 6, U, 5, C, V, S, Z)
+
+"Intermediate Terms
+Accum_Load7..Accum_Load0            node; "8 bit intermediate Accum input
+F_Block7..F_Block0                  node; "8 bit F_Block output
+
+Sum7..Sum0                          node; "8 bit result from adder
+CarryIn8..CarryIn0                  node; "8 bit carry for adder
+
+high_bit                            node; "high bit after shift/rotate
+mid_bit6..mid_bit1                  node; "mid bits after shift/rotate 
+low_bit                             node; "low bit after shift/rotate
+left_mid_bits5..left_mid_bits0      node; "mid bits after shifting left
+right_mid_bits7..right_mid_bits2    node; "mid bits after shifting right
+
+AddCarryFlag			            node; "carry flag calculation for adder
+ShiftCarryFlag			            node; "carry flag calculation for shift
+AddOverflowFlag                     node; "overflow flag calculation for adder
+ShiftOverflowFlag                   node; "overflow flag calculation for shift
+AddSignFlag			                node; "sign flag calculation for adder
+ShiftSignFlag			            node; "sign flag calculation for shift
+AddZeroFlag			                node; "zero flag calculation for adder
+ShiftZeroFlag			            node; "zero flag calculation for shift
+
+"Busses/Vectors
+zero = [0, 0, 0, 0, 0, 0, 0, 0];           "constant 0 value
+one = [0, 0, 0, 0, 0, 0, 0, 1];            "constant 1 value
+
+Accum = [Accum7..Accum0];                  "accumulator register
+Accum_Load = [Accum_Load7..Accum_Load0];   "intermediate accumulator input
+Data = [Data7..Data0];                     "external data input
+
+F_Block = [F_Block7..F_Block0];            "performs logical operations
+Flags = [Flags7..Flags0];                  "status flags 
+                                           "(Interrupt, Flags6, User, Flags5, Carry, Overflow, Sign, Zero)
+
+"Shifter/Rotator buses
+mid_bits = [mid_bit6..mid_bit1];           
+left_mid_bits = [Accum5..Accum0];
+right_mid_bits = [Accum7..Accum2];
+
+Sum = [Sum7..Sum0];                                     "adder output
+Shift_Rotate = [high_bit, mid_bit6..mid_bit1, low_bit]; "shift/rotate output
+
+CarryIn = [CarryIn7..CarryIn0];  "adder carry input
+CarryOut = [CarryIn8..CarryIn1]; "adder carry output
+
+" Source Select Logic---------------------------------------------------------
+" Source selects for F_Block
+"                  Sel3    Sel2    Sel1    Sel0
+"zero               0       0       0       0
+"NOR                0       0       0       1
+"NOT_Accum          0       0       1       1
+"NOT_Data           0       1       0       1
+"XOR                0       1       1       0
+"NAND               0       1       1       1
+"AND                1       0       0       0
+"XNOR               1       0       0       1
+"Data               1       0       1       0
+"Accum              1       1       0       0
+"OR                 1       1       1       0
+"one                1       1       1       1
+
+"Source selects for Shifter/Rotator
+" High bit
+"                  Sel9    Sel8    Sel7
+" Accum7            1       1       1        -> ASR
+" Accum6            0       1       1        -> ASL/LSL, ROL, RLC
+" carry             1       0       1        -> RRC
+" zero              0       0       0        -> LSR
+" Accum0            0       0       1        -> ROR
+
+" Middle bit
+"                  Sel6
+" left_mid_bits     1                        -> LSR, ASR, ROR, RRC
+" right_mid_bits    0                        -> ASL/LSL, ROL, RLC
+
+" Low bit
+"                  Sel5    Sel4
+" Accum1            1       0                -> LSR, ASR, ROR, RRC
+" Accum7            0       1                -> ROL
+" carry             1       1                -> RLC
+" zero              0       0                -> ASL/LSL
+
+" Source selects for CarryIn0
+"                  Sel11   Sel10
+" ADD               1       1                -> ADD
+" SUB               0       0                -> SUB
+" ADC               1       0                -> ADC
+" SBB               0       1                -> SBB
+
+" Source selects for result
+"                  Sel12
+" adder             1 
+" shift_rot         0 
+
+" Source selects for holding flags
+"                  Sel14    Sel13
+" ChangeAll         1        1
+" ChangeSZ          1        0
+" POPF              0        1
+" ChangeNone        0        0
+
+" Operation selects for flag instructions
+"         FlagInsSel2       FlagInsSel1     FlagInsSel0
+" STI          1                 1               1
+" CLI          1                 1               0
+" STU          1                 0               1
+" CLU          1                 0               0
+" STC          0                 1               1
+" CLC          0                 1               0
+" NONE         0                 0               0
+
+EQUATIONS "--------------------------------------------------------------------
+Accum.CLR = Reset; "clears Accum when reset is active
+Accum.CLK = Clock;  "Accum updates on clock edge
+Flags.CLR = Reset; "clears Flags when reset is active
+Flags.CLK = Clock;  "Flags updates on clock edge
+
+" Shifter/Rotator Implementation----------------------------------------------
+" The shifter uses three independent muxes to find the new values for the high,
+" middle, and low bits.
+
+" 1 x 5:1 mux for high_bit
+high_bit = ((Sel9 & Sel8 & Sel7 & Accum7) #  "ASR, preserves the sign bit
+           (!Sel9 & Sel8 & Sel7 & Accum6) #  "LSL/ROL/RLC, pulls bit 6 into 
+                                             "bit 7
+           (Sel9 & !Sel8 & Sel7 & Flags3) #  "RRC, pulls the Carry flag into 
+                                             "bit 7
+           (!Sel9 & !Sel8 & !Sel7 & 0) #     "LSR, clear bit 7
+           (!Sel9 & !Sel8 & Sel7 & Accum0)); "ROR, pulls bit 0 into bit 7
+
+" 6 x 2:1 mux for mid_bits
+mid_bits = ((Sel6 & left_mid_bits) #  "Left moves use left_mid_bits
+           (!Sel6 & right_mid_bits)); "Right moves use right_mid_bits
+
+" 1 x 4:1 mux for low_bit
+low_bit = ((Sel5 & !Sel4 & Accum1) # "Right moves pull bit 1 into bit 0
+          (!Sel5 & Sel4 & Accum7) #  "ROL pulls bit 7 into bit 0
+          (Sel5 & Sel4 & Flags3) #   "RLC pulls the Carry flag into bit 0
+          (!Sel5 & !Sel4 & 0));      "LSL clears bit 0
+
+" 8 x 4:1 mux for the F_Block (performs logical operations between Accum & Data)
+" Specific operations are listed above. 
+F_Block = ((Sel3 & Accum & Data) #
+          (Sel2 & Accum & !Data) #
+          (Sel1 & !Accum & Data) #
+          (Sel0 & !Accum & !Data));
+
+" Adder-----------------------------------------------------------------------
+"Combines the Accum with output of F_Block
+
+" 1 x 4:1 mux for CarryIn0
+CarryIn0 = (Sel11 & Sel10 & 0) #       "For addition/increment
+           (!Sel11 & !Sel10 & 1) #     "For subtraction/decrement/comparison
+           (Sel11 & !Sel10 & Flags3) # "Carry Flag for ADC
+           (!Sel11 & Sel10 & !Flags3); "!Carry Flag for SBB
+
+"Gates the Accum value with Adder control signal so the operand is 0 when the
+"adder is used for unary operations like LDD or INC
+Accum_Load = Accum & Adder; "loads Accum when Adder is used
+
+"Adder logic implementation
+CarryOut = (Accum_Load & F_Block) # 
+           (CarryIn & (Accum_Load $ F_Block));
+Sum = (Accum_Load $ F_Block) $ CarryIn; 
+
+" 8 x 2:1 mux for Result
+" Chooses between Sum from the adder or Shift_Rotate from Shifter/Rotator
+Accum := (!Hold & ((Sel12 & Sum) # (!Sel12 & Shift_Rotate))) # (Hold & Accum);
+
+
+"Flag calculation / status register-------------------------------------------
+"Interrupt Flag (I)===========================================================
+Flags7 := !(FlagsInsSel2 & FlagsInsSel1 & !FlagsInsSel0)  &
+          ((FlagsInsSel2 & FlagsInsSel1 & FlagsInsSel0) #
+           (!Sel14 & Sel13 & Data7) #
+           (!(!Sel14 & Sel13) & !(FlagsInsSel2 & FlagsInsSel1) & Flags7));
+
+Flags6 :=  (!Sel14 & Sel13 & Data6) # (!(!Sel14 & Sel13) & Flags6);
+
+"User Flag (U)=================================================================
+Flags5 := !(FlagsInsSel2 & !FlagsInsSel1 & !FlagsInsSel0) & 
+          ((FlagsInsSel2 & !FlagsInsSel1 & FlagsInsSel0) # 
+           (!Sel14 & Sel13 & Data5) #
+           (!(!Sel14 & Sel13) & !(FlagsInsSel2 & !FlagsInsSel1) & Flags5));
+
+Flags4 :=  (!Sel14 & Sel13 & Data4) # (!(!Sel14 & Sel13) & Flags4);
+
+"Carry Flag (C)===============================================================
+AddCarryFlag = CarryIn8 $ Sub; "Calculates C for Adder
+ShiftCarryFlag = (!Sel6 & Accum0) # (Sel6 & Accum7); "Calculates C for shifter
+
+"Mux to control which flags are held or updated
+Flags3 := !(!FlagsInsSel2 & FlagsInsSel1 & !FlagsInsSel0) &
+          ((!FlagsInsSel2 & FlagsInsSel1 &  FlagsInsSel0) #
+          (Sel14 & Sel13 & ((Sel12 & AddCarryFlag) # 
+          (!Sel12 & ShiftCarryFlag))) # 
+          (!Sel14 & Sel13 & Data3) # 
+          (!Sel13 & Flags3));
+
+"Overflow Flag(V)=============================================================
+AddOverflowFlag = (Sum7 & !CarryIn8 & CarryIn7) # 
+                  (!Sum7 & CarryIn8 & !CarryIn7); "Finds V for adder
+ShiftOverflowFlag = (Sel6 & ((high_bit & !Accum7) # (!high_bit & Accum7)));
+
+"((Accum7 $ Accum6) & Sel6) # 
+"                    ((high_bit $ Accum7) & !Sel6); Finds V for shifter
+"(ShiftMid & ((ShiftRes7 & !Accum7) # (!ShiftRes7 & Accum7)))
+
+"Mux to control which flags are held or updated
+Flags2 := 
+          (Sel14 & Sel13 & Sel12 & AddOverflowFlag) # 
+          (!Sel12 & ShiftOverflowFlag) #
+          (!Sel14 & Sel13 & Data2) #
+          (!Sel13 & Flags2);
+"!(FlagsInsSel2 # FlagsInsSel1 # FlagsInsSel0) # 
+
+"Sign Flag (S)================================================================
+AddSignFlag = Sum7;       "Finds S for adder
+ShiftSignFlag = high_bit; "Finds S for shifter"
+
+"Mux to control which flags are held or updated 
+Flags1 := 
+          (Sel14 & ((Sel12 & AddSignFlag) # (!Sel12 & ShiftSignFlag))) # 
+          (!Sel14 & Sel13 & Data1) # (!Sel14 & !Sel13 & Flags1);
+
+"Zero Flag (Z)================================================================
+"Finds Z for adder
+AddZeroFlag = (!Sum7 & !Sum6 & !Sum5 & !Sum4 & !Sum3 & !Sum2 & !Sum1 & !Sum0);
+"Finds V for shifter
+ShiftZeroFlag = (!high_bit & !Accum6 & !Accum5 & !Accum4 
+                           & !Accum3 & !Accum2 & !Accum1 & !low_bit); 
+
+"Mux to control which flags are held or updated
+Flags0 := 
+          (Sel14 & ((Sel12 & AddZeroFlag) # (!Sel12 & ShiftZeroFlag))) # 
+          (!Sel14 & Sel13 & Data1) # (!Sel14 & !Sel13 & Flags0);
+
+END ALU
+
+

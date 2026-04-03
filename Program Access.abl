@@ -1,0 +1,176 @@
+MODULE ProgramAccess
+ProgramAccess INTERFACE  (Offset7..Offset0, Direct12..Direct0,
+                          Load, Sel2..Sel0,  
+                          Reset, Clock
+                          -> ProgAddr12..ProgAddr0, PC12..PC0);
+"TITLE 'Program Memory Access Unit'
+
+" Description:  This is the file for HW #6. It implements the Program Memory
+"               Access Unit. This module is the bottom-level for the unit demos
+"               using the Unit Demo Board. The PAU calculates the 13-bit address 
+"               of the next instruction to be fetched from program memory. It 
+"               maintains the Program Counter (PC) and handles all branching.
+"               It consists of the 13 bit PC, mux for the next PC, and a PC
+"               adder. The mux for the next PC selects the source for the next 
+"               address calculation. The PC adder adds the current PC to the 
+"               output of the mux to calculate relative jumps or sequential 
+"               increments (+1). It increments the PC by 1 for most 
+"               instructions but also supports absolute jumps (JMP) and 
+"               relative branches (e.g. JA, JE, JS) using a signed 8 bit
+"               offset. There are two addressing modes: direct and relative.
+"               Direct is the 13-bit aboslute address from the instruction 
+"               while relative is the signed 8 bit offset that's added to the 
+"               next instruction address. 
+
+"
+" Inputs: 	  Offset[7..0]    - 8 bits of offset data
+"             Direct[12..0]   - 13 bits of address data
+"             Load            - 1 bit for loading PC into adder (active high)
+"                               enables adding the current PC to the mux result
+"             Sel[2..0]       - 3 bits of mux select
+"             Reset           - system reset
+"             Clock           - system clock
+"
+" Outputs: 	  ProgAddr[12..0] - 13 bits of program address
+"			  PC[12..0]       - 13 bits of program counter address
+
+
+" Revision History:
+" 02/19/26   Joan Li  Initial Revision
+" 02/20/26   Joan Li  Fixed the addition 
+" 02/21/26   Joan Li  Updated Comments
+" 03/18/26   Joan Li  Updated Comments
+" 03/21/26   Joan Li  Updated COmments
+"
+
+" Source Select Table
+"                     Sel2      Sel1    Sel0
+" directJUMP            0         0       0
+" holdLOW               1         1       1
+" holdHIGH              0         1       1       
+" hold                  0         1       1
+" relativeJUMP          1         0       0
+" addONE                1         0       1
+" indirectJUMP          1         1       0
+
+
+
+" Pin/Signal Declarations======================================================
+
+" Inputs-----------------------------------------------------------------------
+
+Offset7..Offset0        pin; "input 8 bit offset data, relative jump distance
+
+Direct12..Direct0		pin; "input 13 bit address data
+
+Load                    pin; "input for loading PC into adder (active high)
+                             "enables adding the current PC to the mux result
+
+Sel2..Sel0              pin; "input 3 bit mux select
+Reset                   pin; "input system reset
+Clock                   pin; "input system clock
+
+
+" Outputs----------------------------------------------------------------------
+
+PC12..PC0               pin ISTYPE 'REG'; "output 13-bit program counter    
+ProgAddr12..ProgAddr0                pin; "output 13-bit program address
+
+
+" Intermediate Terms-----------------------------------------------------------
+MuxOut12..MuxOut0		node;       "13-bit output of the mux
+
+PC_Load12..PC_Load0		   node;    "13-bit masked PC value that will be added
+                                    "to MuxOut. Used to select between relative
+                                    "and absolute addressing
+
+CarryIn12..CarryIn0        node;    "13-bit output of adding MuxOut and PC_Load
+CarryIn = [CarryIn12..CarryIn0];
+
+select_directJUMP          node;    "seven source selects for the mux
+select_relativeJUMP        node;
+select_indirectJUMP        node;
+select_holdHIGH            node;
+select_holdLOW             node;
+select_hold                node;
+select_addONE              node;
+
+
+" Busses/Vectors---------------------------------------------------------------
+" output 13 bit program address and counter, respectively
+ProgAddr = [ProgAddr12..ProgAddr0]; 
+PC = [PC12..PC0];
+
+" 13 bit output of the mux
+MuxOut = [MuxOut12..MuxOut0];
+
+" 13 bit masked PC value used to select between relative and absolute
+" addressing
+PC_Load = [PC_Load12..PC_Load0];
+
+
+" loads the direct or relative or indirect address to the program counter
+directJUMP_out = [Direct12..Direct0]; 
+" A sign extension is performed so that it can be combined with 13 bit PC
+relativeJUMP_out = [Offset7,Offset7,Offset7,Offset7,Offset7, Offset7..Offset0];
+indirectJUMP_out = [Offset7,Offset7,Offset7,Offset7,Offset7, Offset7..Offset0];
+
+" loads the low 8 bits or high 5 bits to the program counter
+holdLOW_out = [PC12..PC8, Offset7..Offset0];
+holdHIGH_out = [Offset4..Offset0 PC7..PC0];
+
+" holds the program counter or increments by one
+hold_out = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+addONE_out = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1];
+
+"Source Selects 
+" Source Selects for AddrSource
+"                   Sel1    Sel0    Sel0
+" directJUMP         0       0       0
+" relativeJUMP       1       0       0
+" indirectJUMP       1       1       0
+" holdHIGH           1       1       1
+" holdLOW            0       1       1
+" hold               0       0       1
+" addONE             1       0       1
+
+
+EQUATIONS"======================================================================
+" Source Select Declarations
+select_directJUMP = (!Sel2 & !Sel1 & !Sel0);  " Sel = 000 -> directJUMP
+select_relativeJUMP = (Sel2 & !Sel1 & !Sel0); " Sel = 100 -> relativeJUMP
+select_indirectJUMP = (Sel2 & Sel1 & !Sel0);  " Sel = 110 -> indirectJUMP
+select_holdHIGH = (Sel2 & Sel1 & Sel0);       " Sel = 111 -> holdHIGH
+select_holdLOW = (!Sel2 & Sel1 & Sel0);       " Sel = 011 -> holdLOW
+select_hold = (!Sel2 & !Sel1 & Sel0);         " Sel = 001 -> hold
+select_addONE = (Sel2 & !Sel1 & Sel0);        " Sel = 101 -> addONE
+PC.CLR = Reset;
+PC.CLK = Clock;
+
+" an 8 x 8:1 mux
+MuxOut = (select_directJUMP & directJUMP_out) #     " select input directJUMP
+         (select_relativeJUMP & relativeJUMP_out) # " select input relativeJUMP
+         (select_indirectJUMP & indirectJUMP_out) # " select input indirectJUMP
+         (select_holdHIGH & holdHIGH_out) #         " select input holdLOW
+         (select_holdLOW & holdLOW_out) #           " select input holdHIGH
+         (select_hold & hold_out) #                 " select input hold
+         (select_addONE & addONE_out);              " select input addONE
+
+" addition of CarryIn, PC_Load, and MuxOut
+" initializes the first carry bit for the 13 bit adder to 0
+CarryIn0 = 0;
+
+" Mask the PC -- if Load = 1, PC_Load equals PC
+" If Load = 0, PC_Load is forced to 0 which allows for absolute jumps
+PC_Load = PC & Load;
+
+" Generate the carry bits
+CarryIn[12..1] = (MuxOut[11..0] & PC_Load[11..0]) # 
+                 (CarryIn[11..0] & (MuxOut[11..0] $ PC[11..0]));
+
+"Calculates the sum and updates the PC register on the enxt clock edge
+PC := (CarryIn[12..0] $ PC_Load $ MuxOut);
+
+ProgAddr = PC;
+
+END ProgramAccess

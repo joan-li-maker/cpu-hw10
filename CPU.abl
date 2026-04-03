@@ -1,0 +1,258 @@
+MODULE      CPU
+TITLE      'Caltech10 CPU'
+
+
+" Description:  This is a template file for implementing the Caltech10 CPU.
+"               It is the top-level module which will instantiate and connect
+"               the Program Access Unit (PAU), Data Access Unit (DAU), 
+"               Arithmetic Logic Unit (ALU), and Control Unit.
+"
+" Inputs:         ProgramDB[15..0]  - the 16-bit program data bus
+"                 Reset             - system reset signal
+"                 Clock             - system clock
+"
+" I/O:            DataDB[7..0]      - the 8-bit data data bus
+"
+" Outputs:        ProgramAB[12..0]  - the 13-bit program address bus
+"                 DataAB[7..0]      - the 8-bit data address bus
+"                 RD                - read signal for the data data bus
+"                 WR                - write signal for the data data bus
+"                 IO                - memory (0) or I/O (1) is being accessed
+"
+" Status Outputs: Accum[7..0]       - the 8-bit accumulator
+"                 Flags[7..0]       - the 8-bit flag register
+"                 XReg[7..0]        - the 8-bit X register
+"                 SReg[7..0]        - the 8-bit S register
+
+
+" Revision History:
+" 02/15/18   Glen George  Initial Revision
+" 01/05/21   Glen George  Updated comments
+" 03/18/26 	 Joan Li	     Initial Revision
+"
+
+
+
+" Pin/Signal Declarations======================================================
+
+" Inputs-----------------------------------------------------------------------
+
+ProgramDB15..ProgramDB0	   pin;	"input  16-bit instruction data bus
+Reset           	         pin;	"input  system reset signal
+Clock           	         pin;	"input  system clock
+
+
+" I/O--------------------------------------------------------------------------
+
+DataDB7..DataDB0	         pin;	"I/O  8-bit Data data bus
+
+
+" Outputs----------------------------------------------------------------------
+ProgramAB12..ProgramAB0	   pin;	"output  the 13-bit Program address bus
+DataAB7..DataAB0	         pin;	"output  the 8-bit Data address bus
+RD			                  pin;	"output  read signal for the Data data bus
+WR			                  pin;	"output  write signal for the Data data bus
+IO			                  pin;	"output  accessing memory (0) or I/O (1)
+
+
+" Debugging/Status Outputs-----------------------------------------------------
+Accum7..Accum0		         pin;	"8-bit accumulator
+Flags7..Flags0		         pin;	"flags (8 bits)
+XReg7..XReg0		         pin;	"8-bit X register
+SReg7..SReg0		         pin;	"8-bit S register
+
+
+" Internal signals-------------------------------------------------------------
+
+" 16-bit instruction register
+IR15..IR0		                   node;
+PC_high7..PC_high0                node;
+
+PushFlags7..PushFlags0            node;
+ALU_Data7..ALU_Data0              node;
+
+
+" ALU control signals
+Hold                              node;
+Adder                             node;
+Sub                               node;
+FlagsInsSel2..FlagsInsSel0        node;
+FlagSel14..FlagSel13              node;
+ResultSel12                       node;
+CarryIn1..CarryIn0                node;
+ShifterSel9..ShifterSel4          node; 
+FBlockSel3..FBlockSel0            node;
+ALUDataSel1, ALUDataSel0          node;
+DDBSel1, DDBSel0                  node;
+
+" DAU control signals
+
+Inc                     node;
+Dec                     node;
+XLatchEn                node;
+SLatchEn                node;
+Pre                     node;
+OffsetEn                node;
+AddrSel1..AddrSel0      node;
+
+" PAU control signals
+Load                    node;
+PAUSel2..PAUSel0        node;
+
+
+" declare the used modules
+
+ProgramAccess INTERFACE  (Offset7..Offset0, Direct12..Direct0,
+                          Load, Sel2..Sel0,  
+                          Reset, Clock
+                          -> ProgAddr12..ProgAddr0, PC12..PC0);
+
+DataAccess INTERFACE  (Accum7..Accum0, Offset7..Offset0,
+                       Inc, Dec, XLatchEn, SLatchEn, Pre, 
+                       OffsetEn, Sel1..Sel0, Reset, Clock
+                       -> DataAddr7..DataAddr0, XReg7..XReg0, SReg7..SReg0);
+
+ALU INTERFACE  (Data7..Data0,
+                FlagsInsSel2..FlagsInsSel0,
+                Sel14..Sel0, 
+                Hold, Adder, Sub,    
+                Reset, Clock
+                -> Accum7..Accum0, Flags7..Flags0);
+
+ControlUnit INTERFACE (ProgramDB15..ProgramDB0, Flags7..Flags0, Clock, Reset
+                       -> Hold, Adder, Sub, FlagsInsSel2..FlagsInsSel0, 
+                          FlagSel14..FlagSel13,
+                          ResultSel12, CarryIn1..CarryIn0, ShifterSel9..ShifterSel4,
+                          FBlockSel3..FBlockSel0, Inc, Dec, XLatchEn, SLatchEn, Pre,
+                          OffsetEn, AddrSel1..AddrSel0, Load, PAUSel2..PAUSel0, RD, WR, IO,
+                          ALUDataSel1..ALUDataSel0, DDBSel1..DDBSel0, StackPointerSel, IR15..IR0);
+
+" create instances of the modules
+
+
+PAUnit			FUNCTIONAL_BLOCK  ProgramAccess;
+DAUnit			FUNCTIONAL_BLOCK  DataAccess;
+ALUnit			FUNCTIONAL_BLOCK  ALU;
+CUnit			FUNCTIONAL_BLOCK  ControlUnit;
+
+" Busses
+
+ProgramAB	=	[ProgramAB12..ProgramAB0];	"13-bit Program address bus
+ProgramDB	=	[ProgramDB15..ProgramDB0];	"16-bit Program data bus
+DataAB		=	[DataAB7..DataAB0];			"8-bit Data address bus
+DataDB		=	[DataDB7..DataDB0];			"8-bit Data data bus
+
+IR       =  [IR15..IR0];
+XReg 		=  	[XReg7..XReg0];
+SReg 		= 	[SReg7..SReg0];
+PushFlags = [Flags7, 0, Flags5, 0, Flags3..Flags0];
+Accum = [Accum7..Accum0];
+Flags = [Flags7..Flags0];
+ALU_Data = [ALU_Data7..ALU_Data0];
+PC_high = [PC_high7..PC_high0];
+
+EQUATIONS
+"how to make programABIR (?)
+
+
+
+" Control Unit wiring
+
+CUnit.[ProgramDB15..ProgramDB0]  =	ProgramDB;
+CUnit.[Flags7..Flags0]				=	Flags;
+CUnit.Clock                      = Clock;
+CUnit.Reset                      = Reset;
+IR     = CUnit.[IR15..IR0];
+
+ALUnit.[Hold, Adder, Sub]	=	CUnit.[Hold, Adder, Sub];
+ALUnit.[Sel14..Sel13, Sel12, Sel11..Sel10, Sel9..Sel4, Sel3..Sel0] = CUnit.[FlagSel14..FlagSel13, ResultSel12, CarryIn1..CarryIn0, ShifterSel9..ShifterSel4, FBlockSel3..FBlockSel0];
+ALUnit.[FlagsInsSel2..FlagsInsSel0] = CUnit.[FlagsInsSel2..FlagsInsSel0];
+
+" Connect IR bits to DAUnit Offset (for indexed addressing)
+DAUnit.[Offset7..Offset0] = IR[7..0];
+
+" Connect the Accumulator to DAUnit (if needed for address calculations)
+DAUnit.[Accum7..Accum0] = Accum;
+
+DAUnit.[Inc, Dec, XLatchEn, SLatchEn, Pre, OffsetEn, Sel1..Sel0] =	CUnit.[Inc, Dec, XLatchEn, SLatchEn, Pre, OffsetEn, AddrSel1..AddrSel0];
+DAUnit.[Reset, Clock]  =  [Reset, Clock];
+DataAB = DAUnit.[DataAddr7..DataAddr0];
+XReg = DAUnit.[XReg7..XReg0];
+SReg = DAUnit.[SReg7..SReg0];
+
+
+" Connect IR bits to PAUnit Direct address inputs
+PAUnit.[Direct12..Direct0] = IR[12..0];
+ProgramAB = PAUnit.[ProgAddr12..ProgAddr0];
+
+" Connect IR bits to PAUnit Offset (for relative jumps/calls)
+PAUnit.[Offset7..Offset0] = (!CUnit.StackPointerSel & IR[7..0]) # (CUnit.StackPointerSel & DataDB);
+PAUnit.[Load, Sel2..Sel0] = CUnit.[Load, PAUSel2..PAUSel0];
+PAUnit.[Reset, Clock]     =  [Reset, Clock];
+
+"ALU Data Mux
+"           ALUDataSel1       ALUDataSel0
+"DataDB            0                   0
+"IR[7..0]       1                   0
+"X_Reg          0                   1
+"S_Reg          1                   1
+ALUDataSel1 = CUnit.ALUDataSel1;
+
+ALUDataSel0 = CUnit.ALUDataSel0;
+
+DDBSel1     = CUnit.DDBSel1;
+
+DDBSel0     = CUnit.DDBSel0;
+ALU_Data =     (!ALUDataSel1 & !ALUDataSel0)   &  DataDB
+
+            #  (ALUDataSel1 &  !ALUDataSel0)   &  [IR7..IR0]
+            #  (!ALUDataSel1 & ALUDataSel0)   &  XReg
+            #  ( ALUDataSel1 &  ALUDataSel0)   &  SReg;
+
+ALUnit.[Data7..Data0]               =  ALU_Data;
+ALUnit.[Reset, Clock]               =  [Reset, Clock];
+
+Accum                         =  ALUnit.[Accum7..Accum0];
+Flags                         =  ALUnit.[Flags7..Flags0];
+
+
+" output enables
+
+" Data data bus is enabled when writing
+
+"DataDB Mux ---------------------
+"           DDBSel1     DDBSel0
+"PC_Low        0           0
+"PC_High       1           0
+"Accum         0           1
+"Flags         1           1
+
+PC_high[7..5] = [0,0,0];
+PC_high[4..0] = PAUnit.[PC12..PC8];
+
+DataDB = (DDBSel1 & DDBSel0 & PushFlags) #
+         (!DDBSel1 & DDBSel0 & Accum) #
+         (!DDBSel1 & !DDBSel0 & PAUnit.[PC7..PC0]) #
+         (DDBSel1 & !DDBSel0 & PC_high);
+
+
+DataDB.OE  =  WR & !Clock;
+RD = CUnit.RD;
+WR = CUnit.WR;
+IO = CUnit.IO;
+
+
+
+" most signals are always enabled
+ProgramAB.OE         =  ^h1FFF;
+DataAB.OE            =  ^hFF;
+RD.OE                =  1;
+WR.OE                =  1;
+IO.OE                =  1;
+Accum.OE  =  ^hFF;
+Flags.OE  =  ^hFF;
+XReg.OE    =  ^hFF;
+SReg.OE    =  ^hFF;
+
+
+END CPU

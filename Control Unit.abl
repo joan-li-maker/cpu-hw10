@@ -1,0 +1,598 @@
+MODULE ControlUnit
+ControlUnit INTERFACE (ProgramDB15..ProgramDB0, Flags7..Flags0, Clock, Reset
+                       -> Hold, Adder, Sub, FlagsInsSel2..FlagsInsSel0, 
+                          FlagSel14..FlagSel13,
+                          ResultSel12, CarryIn1..CarryIn0, ShifterSel9..ShifterSel4,
+                          FBlockSel3..FBlockSel0, Inc, Dec, XLatchEn, SLatchEn, Pre,
+                          OffsetEn, AddrSel1..AddrSel0, Load, PAUSel2..PAUSel0, RD, WR, IO,
+                          ALUDataSel1..ALUDataSel0, DDBSel1..DDBSel0, StackPointerSel, IR15..IR0);
+
+
+" TITLE 'Control Unit for Caltech10 CPU'
+" Description: This is the file for HW #9. It implements the Control Unit(CU). 
+"              This module is the bottom-level file for the CPU. The CU is 
+"              responsible for fetching, decoding the logic for an instruction, 
+"              and executing instructions between the Program Access Unit(PAU),
+"              Data Access Unit(DAU), and the Arithmetic Logic Unit(ALU). The
+"              main internal blocks are the instruction register, and FSM. It 
+"              The control unit generates control signals for the ALU, DAU, and
+"              PAU using bit decoding. 
+"              
+"
+
+" Inputs:   IR[15..0]         - 16 bit instruction register
+"           Flags[7..0]       - 8 bit status register
+"
+" Outputs 
+"       - ALU Controls
+"           Hold  - 1 bit control for hold
+"           Adder - 1 bit control for using adder
+"           Sub   - 1 bit control for subtraction/addition
+"           FlagsInsSel2..FlagsInsSel0 - 3 bit control for flag instructions 
+"                                        (STI, CLI, STU, CLU, STC, CLC)
+"           FlagSel14..FlagSel13       - 2 bit control for when status register 
+"                                        (flags) are updated
+"           ResultSel12                - 1 bit control for the final 8-bit  
+                                        "result to be latched into Accum. When
+                                        "active high selects adder, when active 
+                                        "low, selects shifter/rotator output.
+"           CarryIn1..CarryIn0 - 2 bit control for CarryIn0 for 8 bit 
+                                 "adder
+"           ShifterSel9..ShifterSel4 - 6 bit control for high, middle, and
+                                       "low bits of shifter/rotator
+"           FBlockSel3..FBlockSel0   - 4 bit control for 8x4:1 mux for 
+                                       "logical operations between Accum and 
+                                       "external Data (FBlock)
+"       - DAU Controls
+"           Inc                  - 1 bit control for Inc
+"           Dec                  - 1 bit control for Dec
+"           XLatchEn             - 1 bit control for latching XReg
+"           SLatchEn             - 1 bit control for latching SReg
+"           Pre                  - 1 bit control for Pre/!Post
+"           OffsetEn             - 1 bit control for enabling Offset
+"           AddrSel1..AddrSel0   - 2 bit mux select for address source
+"       - PAU Controls
+"           Load             - input for loading PC into adder (active high)
+                              "enables adding the current PC to the mux result
+"           PAUSel2..PAUSel0 - input 3 bit mux select for directJUMP, 
+                              "relativeJUMP, indirectJUMP, holdHIGH, holdLOW,
+                              "hold, addONE
+
+" Revision History:
+" 03/13/26      Joan Li     Initial revision
+" 03/14/26      Joan Li     Updated Inputs & Intermediate Terms
+" 03/14/26      Joan Li     Updated bit decodings
+" 03/17/26      Joan Li     Updated logic for instruction decoding
+" 03/18/26      Joan Li     Updated Comments
+" 03/21/26      Joan Li     Updated Comments & implemented FSM
+"
+
+" Pin/Signal Declarations======================================================
+
+" Inputs-----------------------------------------------------------------------
+ProgramDB15..ProgramDB0 pin;
+Flags7..Flags0      pin; "8 bit status flags
+
+
+" Outputs----------------------------------------------------------------------
+IR15..IR0           pin ISTYPE   'REG'; "16 bit instruction register opcode
+Clock               pin; "system clock
+Reset               pin; "system reset
+
+"Control Signals for ALU-------------------------------------------------------
+Hold                              pin; "1 bit control for hold
+Adder                             pin; "1 bit control for using adder
+Sub                               pin; "1 bit control for subtraction/addition
+FlagsInsSel2..FlagsInsSel0        pin; "3 bit control for flag instructions 
+"                                        (STI, CLI, STU, CLU, STC, CLC)
+FlagSel14..FlagSel13              pin; "2 bit control for when status register 
+                                        "(flags) are updated
+ResultSel12                       pin; "1 bit control for the final 8-bit  
+                                        "result to be latched into Accum. When
+                                        "active high selects adder, when active 
+                                        "low, selects shifter/rotator output.
+CarryIn1..CarryIn0                pin; "2 bit control for CarryIn0 for 8 bit 
+                                        "adder
+ShifterSel9..ShifterSel4          pin; "6 bit control for high, middle, and
+                                        "low bits of shifter/rotator
+FBlockSel3..FBlockSel0            pin; "4 bit control for 8x4:1 mux for 
+                                        "logical operations between Accum and 
+                                        "external Data (FBlock)
+ALUDataSel1, ALUDataSel0          pin; "2 bit control for data entering ALU
+DDBSel1, DDBSel0                  pin; "2 bit control for DDB
+
+"Control Signals for DAU-------------------------------------------------------
+Inc                     pin;  "1 bit control for Inc
+Dec                     pin;  "1 bit control for Dec
+XLatchEn                pin;  "1 bit control for latching XReg
+SLatchEn                pin;  "1 bit control for latching SReg
+Pre                     pin;  "1 bit control for Pre/!Post
+OffsetEn                pin;  "1 bit control for enabling Offset
+AddrSel1..AddrSel0      pin;  "2 bit mux select for address source
+
+"Control Signals for PAU-------------------------------------------------------
+Load                    pin; "input for loading PC into adder (active high)
+                              "enables adding the current PC to the mux result
+PAUSel2..PAUSel0        pin; "input 3 bit mux select for directJUMP, 
+                              "relativeJUMP, indirectJUMP, holdHIGH, holdLOW,
+                              "hold, addONE
+
+"Read, Write, & IO Instruction Decoding
+RD                      pin;
+WR                      pin;
+IO                      pin;
+
+"ALU Data Mux
+ALUDataSel1            pin;
+ALUDataSel0            pin;
+
+"DDB Mux
+DDBSel1                 pin;
+DDBSel0                 pin;
+
+"Stack Pointer Mux
+StackPointerSel         pin;
+
+
+
+
+" Intermediate Terms-----------------------------------------------------------
+Load_IR                 node;
+
+"ALU Instructions
+ADC_ADCI                            node; 
+ADD_ADDI                            node; 
+AND_ANDI                            node; 
+ASR                                 node;
+CMP_CMPI                            node; 
+DEC                                 node;
+INC                                 node;
+LSL                                 node;
+LSR                                 node;
+NEG                                 node;
+NOT                                 node;
+OR_ORI                              node; 
+RLC                                 node;
+ROL                                 node;
+ROR                                 node;
+RRC                                 node;
+SBB_SBBI                            node;   
+SUB_SUBI                            node;  
+TST_TSTI                            node;   
+XOR_XORI                            node;
+
+
+
+"Load/Store Instructions
+LDI                                 node;
+LDD                                 node;
+LD_INC_DEC                                  node;
+LD_X                                node;
+LD_S                                node;
+STD                                 node;
+ST_INC_DEC                          node; 
+ST_X                                node;
+ST_S                                node;
+
+"Subroutine/Stack Instructions
+CALL                                node;
+RTS                                 node;
+POPF                                node;
+PUSHF                               node;
+
+"Set/Clear Flag Instructions
+STI                                 node;
+STC                                 node;
+STU                                 node;
+CLI                                 node;
+CLC                                 node;
+CLU                                 node;
+
+"Index Register Instructions
+TAX                                 node;
+TAS                                 node;
+INX                                 node;
+DEX                                 node;
+TXA                                 node;
+TSA                                 node;
+INS                                 node;
+DES                                 node;
+
+"In/Out Instructions
+IN_OP                                node;
+OUT_OP                                 node;
+
+"Miscellaneous Instructions
+NOP                                 node;
+
+"dau and go back and write
+
+"DAU Instruction Decoding ___
+"Inc                                 node;
+"Dec                                 node;
+"XLatchEn                            node;
+"SLatchEn                            node;
+"Pre                                 node;
+"OffsetEn                            node;
+"AddrSel1                            node;
+"AddrSel2                            node;
+
+"
+
+
+"PAU Instruction Decodcarryining
+
+
+
+
+"GROUP NAME
+"Checks if instruction is LDDI, LDD, LD, STD, or ST
+isLDD_STD                           node;
+
+"Checks if instruction requires 1 for CarryIn0 bit 
+isCarryInZero                       node;
+
+"Checks for relative jumps
+isRelJMP                            node;
+
+"Checks for direct jumps
+isDirJMP                            node; 
+
+" Flags (Carry, Overflow, Sign, Zero)
+I, U, C, V, S, Z                          node;
+
+"States for the finite state machine for CALL/RTS
+State2..State0                     node      ISTYPE   'REG';
+
+PAU_Ctrl                            node;
+"PAU_Ctrls                          node;
+RelJMPEn                            node;
+DAU_ALU_En                          node;
+DAU_Mem_En                          node;
+DAU_Ctrl                            node;
+ALU_Ctrl                            node;
+
+IndexRegEn                          node;
+
+
+" Busses/Vectors --------------------------------------------------------------
+ProgramDB = [ProgramDB15..ProgramDB0];
+IR        = [IR15..IR0];
+
+"ALU Instruction Decoding
+CarryIn = [CarryIn1, CarryIn0];
+ShifterSel = [ShifterSel9..ShifterSel4]; 
+
+ASRSel = [1, 1, 1, 0, 1, 0];
+LSLSel = [0, 1, 1, 1, 0, 0];
+LSRSel = [0, 0, 0, 0, 1, 0]; 
+RLCSel = [0, 1, 1, 1, 1, 1];
+ROLSel = [0, 1, 1, 1, 0, 1];
+RORSel = [0, 0, 1, 0, 1, 0];
+RRCSel = [1, 0, 1, 0, 1, 0];
+
+FBlockSel = [FBlockSel3..FBlockSel0];
+FBlockDataSel= [1, 0, 1, 0];
+FBlockANDSel = [1, 0, 0, 0]; 
+FBlockNOTDataSel = [0, 1, 0, 1];
+FBlockOneSel = [1, 1, 1, 1]; 
+FBlockZeroSel = [0, 0, 0, 0]; 
+FBlockXORSel = [0, 1, 1, 0];
+FBlockNOTAccumSel = [0, 0, 1, 1];
+FBlockORSel = [1, 1, 1, 0];
+FBlockAccum = [1, 1, 0, 0];
+
+" Defines the type of relative jump done
+RelCond = [IR13, IR12, IR10];
+SourceCond = [IR9, IR8];
+
+PAU_Ctrls = [Load, PAUSel2..PAUSel0];
+
+PAU_DIRECT = [0, 0, 0, 0];
+PAU_RELATIVE = [1, 1, 0, 0];
+PAU_INCREMENT = [1, 1, 0, 1];
+PAU_HOLD = [1, 0, 0, 1]; 
+PAU_LOW = [0, 0, 1, 1];
+PAU_HIGH = [0, 1, 1, 1];
+
+
+"State for FSM for CALL and RTS
+FSM = [State2..State0];
+"Define the states NEED TO COMMNT WHAT EACH OF THE STATES ARE
+STATE_INIT = [ 0, 0, 0 ];
+STATE_WR_PC_HIGH = [ 0, 0, 1 ];
+STATE_RD_PC_HIGH = [ 0, 1, 0 ];
+STATE_WR_PC_LOW = [ 0, 1, 1 ];
+STATE_DONE = [ 1, 0, 0 ];
+
+TRUTH_TABLE ([CALL, RTS, FSM] :> [FSM])
+
+"CALL
+[ 1, 0, STATE_INIT ] :> [ STATE_WR_PC_HIGH ];
+[ 1, 0, STATE_WR_PC_HIGH ] :> [ STATE_WR_PC_LOW ];
+[ 1, 0, STATE_WR_PC_LOW ] :> [ STATE_DONE ];
+
+"RTS
+[ 0, 1, STATE_INIT ] :> [ STATE_RD_PC_HIGH ];
+[ 0, 1, STATE_RD_PC_HIGH ] :> [ STATE_DONE ];
+
+"CALL and RTS are complete
+[ .X., .X., STATE_DONE ] :> [ STATE_INIT ];
+
+
+
+
+EQUATIONS"=====================================================================
+IR.CLK	=	Clock; "system clock for IR
+IR.CLR	=	Reset; "system reset for IR
+
+"FSM --------------------------------------------------------------------------
+FSM.CLK = Clock; "system clock for FSM
+FSM.CLR = Reset; "system reset for FSM
+
+"generates the IR load control signal to trigger a new fetch during the 
+"starting state for most instructions or after CALL and RTS have finished
+Load_IR = ((FSM == STATE_INIT) & !CALL & !RTS) # (FSM == STATE_DONE);
+
+"Latching logic for IR, loading a new instruction from the PDB when Load_IR
+"is active and holds current instruction when Load_IR is low
+IR  := (Load_IR & ProgramDB) # (!Load_IR & IR);
+
+"Bit decodings for Operation Codes---------------------------------------------
+" Bit decodings for ALU instructions 
+ADC_ADCI = (!IR15 & IR13 & !IR12 & !IR11 & !IR10);
+ADD_ADDI = (!IR15 &  IR14 &  IR13 & !IR12 & IR11 & !IR10);
+AND_ANDI = (!IR15 &  IR14 & !IR13 & !IR11 & IR10);
+ASR      = (!IR15 & IR14 & IR13 & IR12 & !IR11 & !IR10 & !IR1 & IR0);
+CMP_CMPI = (!IR15 & !IR14 &  IR13 & !IR10);
+DEC      = (!IR15 &  IR14 & IR13 & IR12 & IR11 & !IR10);
+INC      = (!IR15 & !IR14 & !IR12 & !IR10 & !IR9);
+LSL      = (!IR15 &  IR14 & IR12 & IR11 & !IR8);
+LSR      = (!IR15 &  IR14 & IR13 & IR12 & !IR10 & !IR9 & !IR1 & !IR0);
+NEG      = (!IR15 & !IR14 & IR13 & !IR12 & !IR11);
+NOT      = (!IR15 & !IR14 & IR13 & !IR12 & IR11);
+OR_ORI   = (!IR15 &  IR14 &  IR13 &  IR12 & !IR11 & IR10);
+RLC      = (!IR15 &  IR14 & !IR13 & IR12 & !IR11 & !IR9);
+ROL      = (!IR15 &  IR14 & !IR13 & !IR10 & IR9);
+ROR      = (!IR15 &  IR14 & IR12 & !IR10 & !IR9 & IR1 & !IR0);
+RRC      = (!IR15 &  IR14 & IR13 & IR12 & !IR10 & IR1 & IR0);
+SBB_SBBI = (!IR15 & !IR14 &  IR11 & !IR10);
+SUB_SUBI = (!IR15 & !IR14 & !IR13 &  IR12 & !IR11);
+TST_TSTI = (!IR15 &  IR14 & !IR13 &  IR11 & IR10);
+XOR_XORI = (!IR15 & !IR14 &  IR12 & !IR11 & IR10);
+
+" Bit decodings for Load/Store instructions 
+LDI = (IR15 & !IR14 & !IR13 & !IR12 & !IR9 & IR8);
+LDD = (IR15 & !IR14 & !IR13 & !IR12 & !IR11 & !IR9);
+LD_INC_DEC  = (IR15 & !IR14 & !IR13 & IR9 & !IR8);
+LD_X = (IR15 & !IR14 & !IR13 & IR12 & !IR11 & IR10 & IR8);
+LD_S = (IR15 & !IR14 & !IR13 & IR12 & !IR11 & !IR10 & IR8);
+STD        = (IR15 & !IR14 & IR13 & !IR12 & !IR11 & !IR9);
+ST_INC_DEC = (IR15 & !IR14 & IR13 & IR9 & !IR8); 
+ST_X       = (IR15 & !IR14 & IR13 & IR12 & !IR11 & IR10);
+ST_S       = (IR15 & !IR14 & IR13 & !IR11 & !IR10 & IR8);
+
+"Subroutine/Stack Instructions
+CALL = (IR15 & IR14 & IR13);
+RTS = (!IR15 & !IR14 & IR12 & IR11 & IR10 & !IR7); 
+POPF = (!IR15 & !IR14 & !IR12 & !IR10 & IR9);
+PUSHF = (!IR15 & !IR14 & !IR12 & IR11 & !IR8 & !IR6);
+NOP = (!IR15 & !IR14 & IR12 & IR11 & IR10 & IR7);
+
+"Set/Clear Flag Instructions
+STI = (!IR15 & IR14 & IR13 & IR12 & IR11 & IR0);
+STC = (!IR15 & IR14 & IR13 & IR12 & IR11 & IR2);
+STU = (!IR15 & IR14 & IR13 & IR12 & IR11 & IR1);
+CLI = (!IR15 & !IR14 & !IR13 & !IR12 & IR0);
+CLC = (!IR15 & !IR14 & !IR13 & !IR12 & IR2);
+CLU = (!IR15 & !IR14 & !IR13 & !IR12 & IR1);
+
+"Index Register Instructions
+TAX = (!IR15 & !IR14 & !IR13 & !IR12 & IR9 & IR8 & !IR6);
+TAS = (!IR15 & !IR14 & !IR13 & !IR12 & IR4);
+INX = (!IR15 & !IR14 & !IR12 & !IR11 & IR10 & !IR9);
+DEX = (!IR15 & !IR14 & !IR13 & IR11 & IR10 & !IR9);
+TXA = (!IR15 & IR14 & IR13 & !IR12 & IR10 & IR8 & IR0);
+TSA = (!IR15 & IR14 & IR13 & !IR12 & IR10 & IR8 & !IR0);
+INS = (!IR15 & !IR14 & !IR12 & !IR11 & IR10 & !IR8);
+DES = (!IR15 & !IR14 & IR11 & IR10 & !IR8 & IR6);
+
+"In/Out Instructions
+IN_OP = (IR15 & !IR14 & !IR13 & IR12 & !IR11 & !IR9);
+OUT_OP = (IR15 & !IR14 & IR13 & IR12 & !IR11 & !IR9);
+
+"Active high when the CPU is accessing I/O isntead of standard data memory
+IO = IN_OP # OUT_OP;
+
+"generates the read control signal for the DDB. Active during data memory loads
+"(direct, indexed, or with inc/dec), I/O operations, popping flags from the 
+"stack, and during the multi-cycle return
+RD = LDD # LD_X # LD_S # LD_INC_DEC # IN_OP # POPF # 
+     DAU_ALU_En & !(IR9 & IR8) # (RTS & ((FSM == STATE_INIT) # 
+     (FSM == STATE_RD_PC_HIGH)));
+
+"generates the write control signal for the DDB. Active during data memory 
+"stores, I/O output operations, PUSHF, and CALL to save the return address
+WR = STD # ST_X # ST_S # ST_INC_DEC # OUT_OP # PUSHF # 
+     (CALL & ((FSM == STATE_WR_PC_HIGH) # (FSM == STATE_WR_PC_LOW)));
+
+
+" Bit decodigns for Branch instructions for PAU
+" If IR8 is high, RelCond corresponds to the following instruction:
+"           IR13      IR12    IR10
+" JA          0         0       0
+" JNC         0         0       1
+" JNS         0         1       0       
+" JNZ         0         1       1
+" JNV         1         0       0
+" JLE         1         0       1
+" JL          1         1       0
+
+" If IR8 is low, RelCond corresponds to the following instruction:
+"           IR13      IR12    IR10
+" JBE         0         0       0
+" JC/JB       0         0       1
+" JS          0         1       0       
+" JZ/JE       0         1       1
+" JV          1         0       0
+" JG          1         0       1
+" JGE         1         1       0
+
+
+"ALU Control-------------------------------------------------------------------
+"helper term that tells us if the current instruction is a load or store 
+"instruction
+isLDD_STD = (LDI # LDD # LD_INC_DEC # LD_X # LD_S 
+                 # STD # ST_INC_DEC # ST_X # ST_S);
+"helper term that identifies arithmetic operations that require initial carry state
+isCarryInZero = (CMP_CMPI # INC # NEG # SUB_SUBI);
+
+"active when the control unit is executing any arithmetic, logical, 
+"shift/rotate, or flag stack instruction
+ALU_Ctrl = (ADC_ADCI # ADD_ADDI # AND_ANDI # ASR      #
+            CMP_CMPI # DEC      # INC      # LSL      # 
+            LSR      # NEG      # NOT      # OR_ORI   # 
+            RLC      # ROL      # ROR      # RRC      # 
+            SBB_SBBI # SUB_SUBI # TST_TSTI # XOR_XORI #
+            POPF     # PUSHF  	# NOP 
+); 
+
+"ALU Instruction Decoding------------------------------------------------------
+
+Hold        = !(ADC_ADCI # ADD_ADDI # isLDD_STD # AND_ANDI # SBB_SBBI # SUB_SUBI # NEG # NOT # DEC # INC # OR_ORI # XOR_XORI #
+               ASR # LSL # LSR # RLC # ROL # ROR # RRC # IN_OP # OUT_OP # TSA # TXA); 
+Adder       = (ADC_ADCI # ADD_ADDI # CMP_CMPI # DEC # INC # SBB_SBBI # SUB_SUBI);
+Sub         = (CMP_CMPI # DEC # SBB_SBBI # SUB_SUBI # NEG); 
+FlagSel14   = !(isLDD_STD # POPF # PUSHF # IN_OP # OUT_OP # NOP # isRelJMP # isDirJMP # STI # CLI # STU # CLU # STC # CLC # CALL # RTS # INX # DEX # TAS # TAX # INS # DES # TXA # TSA);
+FlagSel13   = !(isLDD_STD # AND_ANDI # NOT # OR_ORI # TST_TSTI # XOR_XORI #
+                IN_OP # OUT_OP # NOP # PUSHF # isRelJMP # isDirJMP # STI # CLI # STU # CLU # STC # CLC # CALL # RTS # INX # DEX # TAS # TAX # INS # DES # TXA # TSA);
+
+"chooses adder output for arithmetic operations and active low for shift/rotate
+ResultSel12 = !(ASR # LSL # LSR # RLC # ROL # ROR # RRC);
+CarryIn     = [!(isCarryInZero # SBB_SBBI), !(isCarryInZero # ADC_ADCI)];
+
+"maps the specific shift to required settings
+ShifterSel  = (ASRSel & ASR) # (LSLSel & LSL) # (LSRSel & LSR) # 
+              (RLCSel & RLC) # (ROLSel & ROL) # (RORSel & ROR) #
+              (RRCSel & RRC);
+
+FBlockSel = ((FBlockDataSel     & (ADC_ADCI # ADD_ADDI # isLDD_STD # IN_OP # TSA # TXA)) # 
+             (FBlockANDSel         & (AND_ANDI # TST_TSTI))             # 
+             (FBlockNOTDataSel     & (CMP_CMPI # SBB_SBBI # SUB_SUBI))  # 
+             (FBlockNOTAccumSel & (NEG # NOT)) # 
+             (FBlockOneSel      & DEC) # 
+             (FBlockZeroSel     & INC) # 
+             (FBlockORSel       & OR_ORI) #
+             (FBlockXORSel      & XOR_XORI)
+);
+
+"flag modifying instructions
+FlagsInsSel2 = STI # CLI # STU # CLU;
+FlagsInsSel1 = STI # CLI # STC # CLC;
+FlagsInsSel0 = STI # STU # STC;
+
+
+"DAU Control-----------------------------------------------
+"ALU instructions with memory operands
+DAU_ALU_En = (ADC_ADCI # ADD_ADDI # AND_ANDI # CMP_CMPI #
+             OR_ORI   # SBB_SBBI # SUB_SUBI # TST_TSTI #
+             XOR_XORI
+);
+
+IndexRegEn = (TAX # TXA # INX # DEX # TAS # TSA # INS # DES # PUSHF # POPF);
+
+DAU_Mem_En = (LDI # LD_INC_DEC        # LDD   # LD_X  # LD_S # 
+             STD # ST_INC_DEC # ST_X # ST_S # IN_OP # OUT_OP # 
+             IndexRegEn # PUSHF # POPF);
+ 
+
+DAU_Ctrl = (DAU_ALU_En # DAU_Mem_En); "Don't need?
+
+"DAU Instruction Decoding---------------------------
+Inc      = INS # INX # ((LD_INC_DEC # ST_INC_DEC) & !IR11) # POPF # (RTS & ((FSM == STATE_RD_PC_HIGH) # (FSM == STATE_INIT)));
+Dec      = DES # DEX # ((LD_INC_DEC # ST_INC_DEC) & IR11) # PUSHF # (CALL & ((FSM == STATE_WR_PC_HIGH) # (FSM == STATE_WR_PC_LOW)));
+XLatchEn = (TAX # INX # DEX # ((LD_INC_DEC # ST_INC_DEC) & IR10));
+SLatchEn = (TAS # INS # DES # ((LD_INC_DEC # ST_INC_DEC) & !IR10) # PUSHF # POPF) # (CALL & ((FSM == STATE_WR_PC_HIGH) # (FSM == STATE_WR_PC_LOW))) #
+            (RTS & ((FSM == STATE_RD_PC_HIGH) # (FSM == STATE_INIT)));
+
+
+Pre = (PUSHF # (DAU_ALU_En & (IR9 # IR8))) # ((LD_INC_DEC # ST_INC_DEC) & !IR12) # (CALL & ((FSM == STATE_WR_PC_HIGH) # (FSM == STATE_WR_PC_LOW)));
+
+
+OffsetEn = DAU_ALU_En & (IR9 # IR8) # LD_X # LD_S # LD_INC_DEC # ST_X # ST_S # ST_INC_DEC;
+AddrSel1 = DAU_ALU_En & IR8 # TAX # TXA # INX # DEX # TAS # LD_X # ST_X # ((LD_INC_DEC # ST_INC_DEC) & IR10);
+AddrSel0 = DAU_ALU_En & IR9 # TAX # TAS # TSA # INS # DES # LD_S # ST_S # ((LD_INC_DEC # ST_INC_DEC) & !IR10) # POPF # PUSHF # CALL # RTS;
+
+
+
+"PAU Control-------------------------------------------------
+" Generates branch enable from opcode/instruction register and flag signal
+I   =   Flags7;
+U   =   Flags5;
+C   =   Flags3;
+V   =   Flags2;
+S   =   Flags1;
+Z   =   Flags0;
+
+isRelJMP = IR15 & !IR14 & IR11 & (IR9 !$ IR8); "MIGHT NEED TO CHNAGE BACK LATER
+" Checks for direct jumps
+isDirJMP = (IR15 & IR14 & !IR13); 
+
+RelJMPEn = IR8 $ (
+            ((RelCond == [0, 0, 0]) & (!C & !Z) ) # "Only branches when 
+            ((RelCond == [0, 0, 1]) & !C) #
+            ((RelCond == [0, 1, 0]) & !S) #
+            ((RelCond == [0, 1, 1]) & !Z) #
+            ((RelCond == [1, 0, 0]) & !V) #
+            ((RelCond == [1, 0, 1]) & ((V $ S) # Z)) #
+            ((RelCond == [1, 1, 0]) & (V $ S)) #
+            ((RelCond == [1, 1, 1]) & !U)
+);
+
+PAU_Ctrl = isDirJMP # (RelJMPEn & isRelJMP); "don't need?
+
+"PAU Instruction Decoding--------------------------------- 
+"                       Load    PAUSel2    PAUSel1    PAUSel0
+" PAU_DIRECT             0         0          0          0
+" PAU_RELATIVE           1         1          0          0
+" PAU_INCREMENT          1         1          0          1
+" PAU_HOLD		          1	        0 	       0		      1
+
+
+PAU_Ctrls = (PAU_DIRECT & (isDirJMP # (CALL & (FSM == STATE_WR_PC_LOW)))) #
+           (PAU_INCREMENT & ((((!isRelJMP & !isDirJMP) # (isRelJMP & !RelJMPEn)) & !CALL & !RTS) # (FSM == STATE_DONE))) #
+           (PAU_RELATIVE  & isRelJMP & RelJMPEn) #
+	   (PAU_HOLD & (CALL & ((FSM == STATE_WR_PC_HIGH) # (FSM == STATE_INIT)))) #
+      (PAU_HIGH & RTS & (FSM == STATE_RD_PC_HIGH)) #
+      (PAU_LOW & RTS & (FSM == STATE_INIT));
+   
+ StackPointerSel = RTS & ((FSM == STATE_INIT) # (FSM == STATE_RD_PC_HIGH));
+
+"DataDB Mux ---------------------
+"           DDBSel1     DDBSel0
+"PC_Low        0           0
+"PC_High       1           0
+"Accum         0           1
+"Flags         1           1
+
+"if the flags affect the data data bus" 
+DDBSel1 = PUSHF # (CALL & (FSM == STATE_WR_PC_HIGH));
+
+"if the flags affect the data data bus or if the accum affects the ddb
+DDBSel0 = PUSHF # STD # ST_X # ST_S # OUT_OP # ST_INC_DEC # IN_OP;
+
+"ALU Data Mux
+"           ALUDataSel1       ALUDataSel0
+"DataDB         0                   0
+"IR[7..0]       1                   0
+"X_Reg          0                   1
+"S_Reg          1                   1
+
+"on when selecting for IR or S_Reg
+  
+ALUDataSel1 = TSA # LDI # (DAU_ALU_En & (IR9 & IR8));
+ALUDataSel0 = TSA # TXA;
+
+
+END ControlUnit
+
