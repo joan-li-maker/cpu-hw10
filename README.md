@@ -17,13 +17,14 @@ Manages data movement and memory interactions.
 Combines all components into a functional system capable of executing instructions.
 
 # Key Concepts
-Two’s complement arithmetic
-Boolean logic minimization
-Combinational and sequential logic design
-Instruction flow and control signals
-Tools & Technologies
-ABEL Hardware Description Language
-CPLD hardware (for synthesis and testing)
+- Two’s complement arithmetic
+- Boolean logic minimization
+- Combinational and sequential logic design
+- Instruction flow and control signals
+
+# Tools & Technologies
+- ABEL Hardware Description Language
+- CPLD hardware (for synthesis and testing)
 
 # Notes
 This project emphasizes low-level system design and the interaction between different hardware components in a CPU architecture.
